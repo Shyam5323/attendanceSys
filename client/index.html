@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Face Attendance System</title>
+    <link rel="stylesheet" href="./css/style.css" />
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f5;
+      }
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      }
+      .error {
+        color: #d32f2f;
+        background: #ffebee;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .success {
+        color: #388e3c;
+        background: #e8f5e9;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(0, 0, 0, 0.1);
+        border-radius: 50%;
+        border-top-color: #000;
+        animation: spin 1s ease-in-out infinite;
+        margin-left: 10px;
+        vertical-align: middle;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .tab-content {
+        display: none;
+        padding: 20px 0;
+      }
+      .tab-content.active {
+        display: block;
+      }
+      .tab-btn {
+        padding: 10px 20px;
+        background: #f1f1f1;
+        border: none;
+        cursor: pointer;
+        font-size: 16px;
+        margin-right: 5px;
+      }
+      .tab-btn.active {
+        background: #4285f4;
+        color: white;
+      }
+      .camera-box {
+        margin: 20px 0;
+        text-align: center;
+      }
+      video,
+      canvas {
+        background: #000;
+        border-radius: 8px;
+        max-width: 100%;
+        height: auto;
+      }
+      input,
+      select,
+      button {
+        padding: 12px;
+        margin: 8px 0;
+        width: 100%;
+        max-width: 400px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 16px;
+      }
+      button {
+        background: #4285f4;
+        color: white;
+        cursor: pointer;
+        border: none;
+        transition: background 0.3s;
+      }
+      button:hover {
+        background: #3367d6;
+      }
+      button:disabled {
+        background: #cccccc;
+        cursor: not-allowed;
+      }
+      #appContent {
+        display: none;
+      }
+      .auth-status {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+      }
+      .table-container {
+        overflow-x: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      th {
+        background-color: #f2f2f2;
+      }
+
+      .info {
+        color: #1976d2;
+        background: #e3f2fd;
+        padding: 10px;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Face Recognition Attendance System</h1>
+
+      <!-- Login Section -->
+      <form id="loginForm">
+        <h2>Admin Login</h2>
+        <input
+          type="email"
+          id="loginEmail"
+          placeholder="Admin Email"
+          required
+        />
+        <input
+          type="password"
+          id="loginPassword"
+          placeholder="Password"
+          required
+        />
+        <button type="submit" id="loginBtn">Login</button>
+        <div id="loginError" class="error"></div>
+      </form>
+
+      <!-- Main App Content -->
+      <div id="appContent">
+        <div class="auth-status">
+          <span id="userEmail"></span>
+          <button id="logoutBtn">Logout</button>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="register">Register</button>
+          <button class="tab-btn" data-tab="attendance">Attendance</button>
+          <button class="tab-btn" data-tab="reports">Reports</button>
+        </div>
+
+        <!-- Registration Tab -->
+        <div id="register" class="tab-content active">
+          <h2>Student Registration</h2>
+          <form id="registerForm">
+            <input
+              type="text"
+              id="studentId"
+              placeholder="Student ID"
+              required
+            />
+            <input type="text" id="name" placeholder="Full Name" required />
+            <input type="email" id="regEmail" placeholder="Email" required />
+            <select id="department" required>
+              <option value="">Select Department</option>
+              <option value="CS">Computer Science</option>
+              <option value="EE">Electrical Engineering</option>
+              <option value="ME">Mechanical Engineering</option>
+            </select>
+
+            <div class="camera-box">
+              <video
+                id="registerVideo"
+                width="640"
+                height="480"
+                autoplay
+                muted
+              ></video>
+              <canvas
+                id="registerCanvas"
+                width="640"
+                height="480"
+                style="display: none"
+              ></canvas>
+              <button type="button" id="captureBtn">Capture Photo</button>
+            </div>
+
+            <button type="submit" id="registerBtn">
+              <span id="registerText">Register Student</span>
+              <span
+                id="registerSpinner"
+                class="spinner"
+                style="display: none"
+              ></span>
+            </button>
+          </form>
+          <div id="registerResult"></div>
+        </div>
+
+        <!-- Attendance Tab -->
+        <div id="attendance" class="tab-content">
+          <h2>Mark Attendance</h2>
+          <select id="timeSlot">
+            <option value="morning">Morning (9:00 AM)</option>
+            <option value="afternoon">Afternoon (2:00 PM)</option>
+          </select>
+
+          <div class="camera-box">
+            <video
+              id="attendanceVideo"
+              width="640"
+              height="480"
+              autoplay
+              muted
+            ></video>
+            <canvas
+              id="attendanceCanvas"
+              width="640"
+              height="480"
+              style="display: none"
+            ></canvas>
+            <!--x <button id="markAttendanceBtn">
+                        <span id="markAttendanceText">Recognize & Mark</span>
+                        <span id="markAttendanceSpinner" class="spinner" style="display:none;"></span>
+                    </button>-->
+          </div>
+          <div id="attendanceResult"></div>
+        </div>
+
+        <!-- Reports Tab -->
+        <div id="reports" class="tab-content">
+          <h2>Attendance Reports</h2>
+          <form id="reportForm">
+            <input type="date" id="startDate" required />
+            <input type="date" id="endDate" required />
+            <select id="reportDept">
+              <option value="all">All Departments</option>
+              <option value="CS">Computer Science</option>
+              <option value="EE">Electrical</option>
+              <option value="ME">Mechanical</option>
+            </select>
+            <button type="submit" id="generateReportBtn">
+              <span id="generateReportText">Generate Report</span>
+              <span
+                id="generateReportSpinner"
+                class="spinner"
+                style="display: none"
+              ></span>
+            </button>
+          </form>
+          <div id="reportResult"></div>
+          <button id="exportBtn" style="display: none; margin-top: 20px">
+            Export as CSV
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Load libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="./js/face-api.min.js"></script>
+    <script src="./js/app.js"></script>
+  </body>
+</html>
