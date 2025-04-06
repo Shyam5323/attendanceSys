@@ -251,7 +251,8 @@ const allowedOrigins = [
   "http://13.201.185.149",
   // Add other development URLs as needed
 ];
-
+// Option: Allow any origin (less secure, simpler for testing)
+app.use(cors({ credentials: true }));
 app.use(
   cors({
     origin: function (origin, callback) {
