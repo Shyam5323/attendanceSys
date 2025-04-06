@@ -162,9 +162,11 @@ async function getAttendanceReport(startDate, endDate, department) {
   let params = {
     TableName: ATTENDANCE_TABLE,
     IndexName: "DateIndex",
-    KeyConditionExpression: "#date BETWEEN :startDate AND :endDate",
-    ExpressionAttributeNames: { "#date": "date" },
+    KeyConditionExpression:
+      "shardId = :shardId AND #date BETWEEN :startDate AND :endDate",
+    ExpressionAttributeNames: { "#date": "date" }, 
     ExpressionAttributeValues: {
+      ":shardId": "1", 
       ":startDate": startDate,
       ":endDate": endDate,
     },
@@ -587,6 +589,7 @@ app.post("/api/attendance", authenticate, apiLimiter, async (req, res) => {
       method: "face",
       timestamp: new Date().toISOString(),
       department: student.department,
+      shardId: "1",
     };
 
     await createAttendanceRecord(attendance);
