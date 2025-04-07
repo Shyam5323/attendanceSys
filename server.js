@@ -17,6 +17,7 @@ const AWS = require("aws-sdk");
 const dynamodb = new AWS.DynamoDB.DocumentClient();
 const s3 = new AWS.S3();
 const sns = new AWS.SNS();
+const ses = new AWS.SES({ apiVersion: "2010-12-01" });
 
 // Configure AWS
 AWS.config.update({
@@ -164,9 +165,9 @@ async function getAttendanceReport(startDate, endDate, department) {
     IndexName: "DateIndex",
     KeyConditionExpression:
       "shardId = :shardId AND #date BETWEEN :startDate AND :endDate",
-    ExpressionAttributeNames: { "#date": "date" }, 
+    ExpressionAttributeNames: { "#date": "date" },
     ExpressionAttributeValues: {
-      ":shardId": "1", 
+      ":shardId": "1",
       ":startDate": startDate,
       ":endDate": endDate,
     },
@@ -219,29 +220,60 @@ async function uploadImageToS3(studentId, imageData) {
 
 // SNS Functions
 async function sendAttendanceNotification(studentEmail, timeSlot) {
-  if (!SNS_TOPIC_ARN) return;
+  const verifiedSenderEmail = "shyammm53@gmail.com";
 
-  const message = {
-    default: `Attendance marked for ${timeSlot} slot`,
-    email: `Your attendance has been successfully marked for the ${timeSlot} slot.`,
-  };
+  if (!studentEmail || !verifiedSenderEmail.includes("@")) {
+    console.error(
+      "Skipping email: Invalid studentEmail or unconfigured verifiedSenderEmail."
+    );
+    return;
+  }
 
   const params = {
-    TopicArn: SNS_TOPIC_ARN,
-    Message: JSON.stringify(message),
-    Subject: "Attendance Confirmation",
-    MessageStructure: "json",
-    MessageAttributes: {
-      email: {
-        DataType: "String",
-        StringValue: studentEmail,
+    Destination: {
+      ToAddresses: [studentEmail],
+    },
+    Message: {
+      Body: {
+        Html: {
+          Charset: "UTF-8",
+          Data: `
+            <html>
+            <body>
+              <h1>Attendance Marked</h1>
+              <p>Hi,</p>
+              <p>Your attendance has been successfully marked for the ${timeSlot} slot.</p>
+              <p>Thank you!</p>
+            </body>
+            </html>
+          `,
+        },
+        Text: {
+          Charset: "UTF-8",
+          Data: `Hi,\n\nYour attendance has been successfully marked for the ${timeSlot} slot.\n\nThank you!`,
+        },
+      },
+      Subject: {
+        Charset: "UTF-8",
+        Data: "Attendance Confirmation",
       },
     },
+    Source: verifiedSenderEmail,
   };
 
-  await sns.publish(params).promise();
+  try {
+    const data = await ses.sendEmail(params).promise();
+    console.log(
+      `Email sent successfully to ${studentEmail}. Message ID:`,
+      data.MessageId
+    );
+  } catch (err) {
+    console.error(
+      `Error sending email via SES to ${studentEmail}:`,
+      err.message
+    );
+  }
 }
-
 // ======================
 // 3. Middleware
 // ======================
@@ -253,7 +285,6 @@ const allowedOrigins = [
   "http://13.201.185.149",
   // Add other development URLs as needed
 ];
-// Option: Allow any origin (less secure, simpler for testing)
 app.use(cors({ credentials: true }));
 app.use(
   cors({
