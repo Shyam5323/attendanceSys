@@ -217,6 +217,11 @@ async function uploadImageToS3(studentId, imageData) {
 
 // SNS Functions
 async function sendAttendanceNotification(studentEmail, timeSlot) {
+  if (!studentEmail) {
+    console.error("No email provided for attendance notification");
+    return;
+  }
+
   const verifiedSenderEmail = "shyammm53@gmail.com";
 
   if (!studentEmail || !verifiedSenderEmail.includes("@")) {
@@ -224,6 +229,19 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
       "Skipping email: Invalid studentEmail or unconfigured verifiedSenderEmail."
     );
     return;
+  }
+
+  try {
+    const listParams = {
+      MaxItems: 1000
+    };
+    const verifiedEmails = await ses.listVerifiedEmailAddresses(listParams).promise();
+    
+    if (!verifiedEmails.VerifiedEmailAddresses.includes(studentEmail)) {
+      console.warn(`Recipient email ${studentEmail} is not verified in SES. Sending anyway.`);
+    }
+  } catch (err) {
+    console.error("Error checking verified emails:", err);
   }
 
   const params = {
@@ -238,37 +256,60 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
             <html>
             <body>
               <h1>Attendance Marked</h1>
-              <p>Hi,</p>
-              <p>Your attendance has been successfully marked for the ${timeSlot} slot.</p>
-              <p>Thank you!</p>
+              <p>Dear Student,</p>
+              <p>Your attendance has been successfully recorded for the ${timeSlot === 'morning' ? 'Morning (9:00 AM)' : 'Afternoon (2:00 PM)'} session.</p>
+              <p>Thank you for using our Face Recognition Attendance System.</p>
+              <p>Best regards,<br>The Attendance Team</p>
             </body>
             </html>
           `,
         },
         Text: {
           Charset: "UTF-8",
-          Data: `Hi,\n\nYour attendance has been successfully marked for the ${timeSlot} slot.\n\nThank you!`,
+          Data: `Your attendance has been successfully recorded for the ${timeSlot === 'morning' ? 'Morning (9:00 AM)' : 'Afternoon (2:00 PM)'} session.\n\nThank you!`,
         },
       },
       Subject: {
         Charset: "UTF-8",
-        Data: "Attendance Confirmation",
+        Data: "Attendance Confirmation Notification",
       },
     },
     Source: verifiedSenderEmail,
   };
 
-  try {
+ try {
     const data = await ses.sendEmail(params).promise();
-    console.log(
-      `Email sent successfully to ${studentEmail}. Message ID:`,
-      data.MessageId
-    );
+    console.log(`Email sent successfully to ${studentEmail}. Message ID: ${data.MessageId}`);
+    return true;
   } catch (err) {
-    console.error(
-      `Error sending email via SES to ${studentEmail}:`,
-      err.message
-    );
+    console.error(`Error sending email to ${studentEmail}:`, err);
+    return false;
+  }
+}
+
+async function verifyAndAddSESEmail(email) {
+  const params = {
+    EmailAddress: email
+  };
+
+  try {
+    // First check if email is already verified
+    const listParams = {
+      MaxItems: 1000
+    };
+    const verifiedEmails = await ses.listVerifiedEmailAddresses(listParams).promise();
+    
+    if (verifiedEmails.VerifiedEmailAddresses.includes(email)) {
+      return true; // Already verified
+    }
+
+    // If not verified, send verification email
+    await ses.verifyEmailIdentity(params).promise();
+    console.log(`Verification email sent to ${email}`);
+    return false; // Not yet verified
+  } catch (err) {
+    console.error(`Error verifying email ${email}:`, err);
+    throw err;
   }
 }
 // ======================
@@ -432,6 +473,14 @@ app.post("/api/students", authenticate, apiLimiter, async (req, res) => {
 
     if (!studentId || !name || !email || !department || !image) {
       return res.status(400).json({ error: "All fields are required" });
+    }
+    // Verify email with SES before proceeding
+    try {
+      await verifyAndAddSESEmail(email);
+    } catch (err) {
+      console.error("SES verification failed:", err);
+      // You can choose to proceed anyway or return an error
+      // For now, we'll just log it and continue
     }
 
     // Check if models are loaded
