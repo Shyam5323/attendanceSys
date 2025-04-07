@@ -135,21 +135,21 @@ async function createAttendanceRecord(record) {
     TableName: ATTENDANCE_TABLE,
     Item: record,
   };
+
   await dynamodb.put(params).promise();
   return params.Item;
 }
 
-async function getAttendanceForStudent(studentId, date, timeSlot) {
+async function getAttendanceForStudent(studentId, datetimeSlot) {
   const params = {
     TableName: ATTENDANCE_TABLE,
     IndexName: "StudentDateIndex",
-    KeyConditionExpression: "studentId = :studentId AND #date = :date",
-    FilterExpression: "timeSlot = :timeSlot",
-    ExpressionAttributeNames: { "#date": "date" },
+    KeyConditionExpression:
+      "studentId = :studentId AND #datetimeSlot = :datetimeSlot",
+    ExpressionAttributeNames: { "#datetimeSlot": "datetimeSlot" },
     ExpressionAttributeValues: {
       ":studentId": studentId,
-      ":date": date,
-      ":timeSlot": timeSlot,
+      ":datetimeSlot": datetimeSlot,
     },
   };
   const result = await dynamodb.query(params).promise();
@@ -232,13 +232,10 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
   }
 
   try {
-    const listParams = {
-      MaxItems: 1000
-    };
-    const verifiedEmails = await ses.listVerifiedEmailAddresses(listParams).promise();
-    
+    const verifiedEmails = await ses.listVerifiedEmailAddresses().promise();
+
     if (!verifiedEmails.VerifiedEmailAddresses.includes(studentEmail)) {
-      console.warn(`Recipient email ${studentEmail} is not verified in SES. Sending anyway.`);
+      console.warn("Not registered email:", studentEmail);
     }
   } catch (err) {
     console.error("Error checking verified emails:", err);
@@ -257,7 +254,11 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
             <body>
               <h1>Attendance Marked</h1>
               <p>Dear Student,</p>
-              <p>Your attendance has been successfully recorded for the ${timeSlot === 'morning' ? 'Morning (9:00 AM)' : 'Afternoon (2:00 PM)'} session.</p>
+              <p>Your attendance has been successfully recorded for the ${
+                timeSlot === "morning"
+                  ? "Morning (9:00 AM)"
+                  : "Afternoon (2:00 PM)"
+              } session.</p>
               <p>Thank you for using our Face Recognition Attendance System.</p>
               <p>Best regards,<br>The Attendance Team</p>
             </body>
@@ -266,7 +267,9 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
         },
         Text: {
           Charset: "UTF-8",
-          Data: `Your attendance has been successfully recorded for the ${timeSlot === 'morning' ? 'Morning (9:00 AM)' : 'Afternoon (2:00 PM)'} session.\n\nThank you!`,
+          Data: `Your attendance has been successfully recorded for the ${
+            timeSlot === "morning" ? "Morning (9:00 AM)" : "Afternoon (2:00 PM)"
+          } session.\n\nThank you!`,
         },
       },
       Subject: {
@@ -277,9 +280,11 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
     Source: verifiedSenderEmail,
   };
 
- try {
+  try {
     const data = await ses.sendEmail(params).promise();
-    console.log(`Email sent successfully to ${studentEmail}. Message ID: ${data.MessageId}`);
+    console.log(
+      `Email sent successfully to ${studentEmail}. Message ID: ${data.MessageId}`
+    );
     return true;
   } catch (err) {
     console.error(`Error sending email to ${studentEmail}:`, err);
@@ -289,16 +294,12 @@ async function sendAttendanceNotification(studentEmail, timeSlot) {
 
 async function verifyAndAddSESEmail(email) {
   const params = {
-    EmailAddress: email
+    EmailAddress: email,
   };
 
   try {
-    // First check if email is already verified
-    const listParams = {
-      MaxItems: 1000
-    };
-    const verifiedEmails = await ses.listVerifiedEmailAddresses(listParams).promise();
-    
+    const verifiedEmails = await ses.listVerifiedEmailAddresses().promise();
+
     if (verifiedEmails.VerifiedEmailAddresses.includes(email)) {
       return true; // Already verified
     }
@@ -474,14 +475,6 @@ app.post("/api/students", authenticate, apiLimiter, async (req, res) => {
     if (!studentId || !name || !email || !department || !image) {
       return res.status(400).json({ error: "All fields are required" });
     }
-    // Verify email with SES before proceeding
-    try {
-      await verifyAndAddSESEmail(email);
-    } catch (err) {
-      console.error("SES verification failed:", err);
-      // You can choose to proceed anyway or return an error
-      // For now, we'll just log it and continue
-    }
 
     // Check if models are loaded
     if (!modelPathsVerified) {
@@ -561,6 +554,15 @@ app.post("/api/students", authenticate, apiLimiter, async (req, res) => {
     };
 
     await createStudent(student);
+    try {
+      const verifiedEmails = await ses.listVerifiedEmailAddresses().promise();
+
+      if (!verifiedEmails.VerifiedEmailAddresses.includes(studentEmail)) {
+        verifiedSenderEmail = await verifyAndAddSESEmail(studentEmail);
+      }
+    } catch (err) {
+      console.error("Error checking verified emails:", err);
+    }
     res.json({
       studentId: student.studentId,
       name: student.name,
@@ -640,12 +642,11 @@ app.post("/api/attendance", authenticate, apiLimiter, async (req, res) => {
       return res.status(404).json({ error: "Student not found" });
     }
 
-    // Check if attendance already marked for this timeslot today
     const today = new Date().toISOString().split("T")[0];
+    const datetimeSlot = `${today}#${timeSlot}`;
     const existingAttendance = await getAttendanceForStudent(
       student.studentId,
-      today,
-      timeSlot
+      datetimeSlot
     );
 
     if (existingAttendance) {
@@ -657,18 +658,16 @@ app.post("/api/attendance", authenticate, apiLimiter, async (req, res) => {
         },
       });
     }
-
-    // Record attendance
     const attendance = {
       studentId: student.studentId,
       date: today,
-      timeSlot,
+      timeSlot: timeSlot,
+      datetimeSlot,
       method: "face",
       timestamp: new Date().toISOString(),
       department: student.department,
       shardId: "1",
     };
-
     await createAttendanceRecord(attendance);
 
     // Send notification
