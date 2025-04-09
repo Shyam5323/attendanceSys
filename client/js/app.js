@@ -1,5 +1,5 @@
 // Configuration
-const API_BASE_URL = "/api"; // Use a relative path
+const API_BASE_URL = "/api";
 let activeStream = null;
 let isFaceApiReady = false;
 let faceModelsLoaded = false;
@@ -15,7 +15,7 @@ const REQUIRED_DETECTION_FRAMES = 15; // About 3 seconds at 5fps
 async function loadFaceModels() {
   try {
     // Use the correct path to your models
-    const modelPath = "/models";
+    const modelPath = "/models"; // or '/client/models' if needed
 
     console.log("Loading models from:", modelPath);
 
@@ -52,16 +52,13 @@ async function loadFaceModels() {
       Failed to load face detection models!<br>
       Please:<br>
       1. Check console for details<br>
-      2. Verify models exist in /models folder<br>
+      2. Verify models exist in /client/models folder<br>
       3. Refresh the page
     `
     );
     throw error;
   }
 }
-
-// Make sure to call this function when your app initializes
-document.addEventListener("DOMContentLoaded", loadFaceModels);
 
 // Camera Management
 async function initCamera(videoElementId) {
@@ -119,6 +116,7 @@ function stopCamera() {
 // Feature Implementations
 // ======================
 
+// Student Registration
 document
   .getElementById("registerForm")
   ?.addEventListener("submit", async (e) => {
@@ -129,7 +127,7 @@ document
 
     btn.disabled = true;
     text.style.display = "none";
-    spinner.style.display = "inline-block";
+    spinner.classList.add("active");
 
     try {
       const canvas = document.getElementById("registerCanvas");
@@ -174,7 +172,7 @@ document
         image: imgDataUrl,
       };
 
-      // Send to server (will be stored in S3 and DynamoDB)
+      // Send to server
       const response = await axios
         .post(`${API_BASE_URL}/students`, formData, {
           headers: getAuthHeaders(),
@@ -197,8 +195,7 @@ document
         `
       Registered successfully!<br>
       ID: ${response.data.studentId}<br>
-      Name: ${response.data.name}<br>
-      Image stored in S3
+      Name: ${response.data.name}
     `
       );
 
@@ -210,20 +207,29 @@ document
     } finally {
       btn.disabled = false;
       text.style.display = "inline";
-      spinner.style.display = "none";
+      spinner.classList.remove("active");
     }
   });
 
-// Auto attendance detection
+// Attendance Marking
 async function startAttendanceDetection() {
   if (attendanceDetectionInterval) return;
 
   const video = document.getElementById("attendanceVideo");
   const canvas = document.getElementById("attendanceCanvas");
   const resultEl = document.getElementById("attendanceResult");
+  const statusEl = document.querySelector(".recognition-status span");
 
   // Clear any previous messages
   resultEl.innerHTML = "";
+
+  // Fetch current admin's student count for display
+  try {
+    const students = await getAdminStudents();
+    document.getElementById("totalStudents").textContent = students.length || 0;
+  } catch (err) {
+    console.error("Error fetching students:", err);
+  }
 
   attendanceDetectionInterval = setInterval(async () => {
     try {
@@ -246,8 +252,8 @@ async function startAttendanceDetection() {
       if (detections.length === 1) {
         faceDetectionCount++;
 
-        // Show countdown to user
-        resultEl.innerHTML = `<div class="info">Detected face (${faceDetectionCount}/${REQUIRED_DETECTION_FRAMES})</div>`;
+        // Update status
+        statusEl.textContent = `Detected face (${faceDetectionCount}/${REQUIRED_DETECTION_FRAMES})`;
 
         if (faceDetectionCount >= REQUIRED_DETECTION_FRAMES) {
           clearInterval(attendanceDetectionInterval);
@@ -257,7 +263,7 @@ async function startAttendanceDetection() {
           const imgDataUrl = canvas.toDataURL("image/jpeg", 0.9);
 
           // Show processing message
-          resultEl.innerHTML = `<div class="info">Processing attendance...</div>`;
+          statusEl.textContent = "Processing attendance...";
 
           try {
             const response = await axios.post(
@@ -271,16 +277,16 @@ async function startAttendanceDetection() {
               }
             );
 
+            // Update attendance stats
+            updateAttendanceStats(response.data.stats);
+
             showSuccess(
               "attendanceResult",
               `
               Attendance marked!<br>
               Name: ${response.data.student.name}<br>
               ID: ${response.data.student.studentId}<br>
-              Time: ${new Date(
-                response.data.timestamp
-              ).toLocaleTimeString()}<br>
-              Notification sent to ${response.data.student.email}
+              Time: ${new Date(response.data.timestamp).toLocaleTimeString()}
             `
             );
           } catch (err) {
@@ -289,6 +295,7 @@ async function startAttendanceDetection() {
 
           // Reset counter
           faceDetectionCount = 0;
+          statusEl.textContent = "Ready for recognition";
 
           // Restart detection after a short delay
           setTimeout(startAttendanceDetection, 3000);
@@ -297,7 +304,7 @@ async function startAttendanceDetection() {
         // Reset counter if no face or multiple faces
         if (faceDetectionCount > 0) {
           faceDetectionCount = 0;
-          resultEl.innerHTML = `<div class="info">Show your face clearly</div>`;
+          statusEl.textContent = "Show your face clearly";
         }
       }
     } catch (err) {
@@ -307,8 +314,20 @@ async function startAttendanceDetection() {
         attendanceDetectionInterval = null;
       }
       faceDetectionCount = 0;
+      statusEl.textContent = "Ready for recognition";
     }
   }, 200); // Run detection every 200ms (5fps)
+}
+
+function updateAttendanceStats(stats) {
+  if (stats) {
+    document.getElementById("totalStudents").textContent =
+      stats.totalStudents || 0;
+    document.getElementById("presentStudents").textContent =
+      stats.presentToday || 0;
+    document.getElementById("attendancePercentage").textContent =
+      stats.attendanceRate ? `${stats.attendanceRate}%` : "0%";
+  }
 }
 
 function stopAttendanceDetection() {
@@ -317,9 +336,11 @@ function stopAttendanceDetection() {
     attendanceDetectionInterval = null;
   }
   faceDetectionCount = 0;
+  document.querySelector(".recognition-status span").textContent =
+    "Ready for recognition";
 }
 
-// Generate Reports from DynamoDB
+// Generate Reports
 document.getElementById("reportForm")?.addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -329,7 +350,7 @@ document.getElementById("reportForm")?.addEventListener("submit", async (e) => {
 
   btn.disabled = true;
   text.style.display = "none";
-  spinner.style.display = "inline-block";
+  spinner.classList.add("active");
 
   try {
     // Prepare query parameters
@@ -339,7 +360,7 @@ document.getElementById("reportForm")?.addEventListener("submit", async (e) => {
       department: document.getElementById("reportDept").value,
     });
 
-    // Fetch report data from DynamoDB
+    // Fetch report data
     const response = await axios.get(
       `${API_BASE_URL}/attendance/report?${params}`,
       {
@@ -354,7 +375,7 @@ document.getElementById("reportForm")?.addEventListener("submit", async (e) => {
   } finally {
     btn.disabled = false;
     text.style.display = "inline";
-    spinner.style.display = "none";
+    spinner.classList.remove("active");
   }
 });
 
@@ -375,67 +396,138 @@ function getAuthHeaders() {
   };
 }
 
-// Display report data from DynamoDB
-function displayReportData(data) {
+// Display report data
+function displayReportData(response) {
   const container = document.getElementById("reportResult");
+  const tableBody = document.querySelector("#reportTable tbody");
 
-  if (!data || data.length === 0) {
-    container.innerHTML = '<div class="info">No attendance records found</div>';
+  // Check if we have records in the response
+  if (!response.records || response.records.length === 0) {
+    container.innerHTML =
+      '<div class="info-message">No attendance records found</div>';
     document.getElementById("exportBtn").style.display = "none";
     return;
   }
 
-  // Generate HTML table
-  let html = `
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Student ID</th>
-            <th>Name</th>
-            <th>Department</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody>
-  `;
+  // Clear existing rows
+  tableBody.innerHTML = "";
 
-  data.forEach((record) => {
-    html += `
-      <tr>
-        <td>${new Date(record.date).toLocaleDateString()}</td>
-        <td>${record.studentId}</td>
-        <td>${record.studentName}</td>
-        <td>${record.department}</td>
-        <td>${record.timeSlot === "morning" ? "9:00 AM" : "2:00 PM"}</td>
-      </tr>
+  // Add new rows from the records array
+  response.records.forEach((record) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${record.studentId}</td>
+      <td>${record.studentName}</td>
+      <td>${record.department}</td>
+      <td>${new Date(record.date).toLocaleDateString()}</td>
+      <td><span class="badge badge-success">Present</span></td>
+      <td>${
+        record.timeSlot === "morning"
+          ? "Morning"
+          : record.timeSlot === "afternoon"
+          ? "Afternoon"
+          : "Evening"
+      }</td>
     `;
+    tableBody.appendChild(row);
   });
 
-  html += `
-        </tbody>
-      </table>
-    </div>
-  `;
+  // Update summary stats
+  if (response.summary) {
+    document.getElementById("totalRecords").textContent =
+      response.summary.totalRecords || 0;
+    document.getElementById("avgAttendance").textContent = response.summary
+      .avgAttendance
+      ? `${response.summary.avgAttendance}%`
+      : "0%";
+    document.getElementById("topDepartment").textContent =
+      response.summary.topDepartment || "-";
+    document.getElementById("mostPresent").textContent =
+      response.summary.mostPresentStudent || "-";
+  }
 
-  container.innerHTML = html;
+  // Initialize chart with chartData
+  initAttendanceChart(response.chartData || []);
+
   document.getElementById("exportBtn").style.display = "block";
-  window.reportData = data; // Store for export
+  window.reportData = response; // Store for export
+}
+
+// Initialize attendance chart
+function initAttendanceChart(chartData) {
+  const ctx = document.getElementById("attendanceChart").getContext("2d");
+
+  if (
+    window.attendanceChart &&
+    typeof window.attendanceChart.destroy === "function"
+  ) {
+    window.attendanceChart.destroy();
+  }
+
+  const labels = chartData.map((item) => item.date);
+  const presentData = chartData.map((item) => item.present);
+  const absentData = chartData.map((item) => item.absent);
+
+  window.attendanceChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: "Present",
+          data: presentData,
+          backgroundColor: "rgba(67, 97, 238, 0.7)",
+          borderColor: "rgba(67, 97, 238, 1)",
+          borderWidth: 1,
+        },
+        {
+          label: "Absent",
+          data: absentData,
+          backgroundColor: "rgba(247, 37, 133, 0.7)",
+          borderColor: "rgba(247, 37, 133, 1)",
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: "Number of Students",
+          },
+        },
+        x: {
+          title: {
+            display: true,
+            text: "Date",
+          },
+        },
+      },
+    },
+  });
 }
 
 // Export to CSV
 document.getElementById("exportBtn")?.addEventListener("click", () => {
-  if (!window.reportData || window.reportData.length === 0) return;
+  if (!window.reportData?.records || window.reportData.records.length === 0)
+    return;
 
-  let csvContent = "Date,Student ID,Name,Department,Time\n";
+  let csvContent = "Date,Student ID,Name,Department,Status,Session\n";
 
-  window.reportData.forEach((record) => {
+  window.reportData.records.forEach((record) => {
     csvContent +=
       `"${new Date(record.date).toLocaleDateString()}",` +
       `"${record.studentId}","${record.studentName}",` +
-      `"${record.department}","${
-        record.timeSlot === "morning" ? "9:00 AM" : "2:00 PM"
+      `"${record.department}","Present",` +
+      `"${
+        record.timeSlot === "morning"
+          ? "Morning"
+          : record.timeSlot === "afternoon"
+          ? "Afternoon"
+          : "Evening"
       }"\n`;
   });
 
@@ -452,6 +544,11 @@ document.getElementById("exportBtn")?.addEventListener("click", () => {
   document.body.removeChild(link);
 });
 
+// Print Report
+document.getElementById("printBtn")?.addEventListener("click", () => {
+  window.print();
+});
+
 // Show error message
 function showError(elementId, message) {
   const element = document.getElementById(elementId);
@@ -459,7 +556,7 @@ function showError(elementId, message) {
     console.error(`Element #${elementId} not found`);
     return;
   }
-  element.innerHTML = `<div class="error">${message}</div>`;
+  element.innerHTML = `<div class="error-message">${message}</div>`;
   element.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -470,7 +567,7 @@ function showSuccess(elementId, message) {
     console.error(`Element #${elementId} not found`);
     return;
   }
-  element.innerHTML = `<div class="success">${message}</div>`;
+  element.innerHTML = `<div class="success-message">${message}</div>`;
   element.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
@@ -482,7 +579,22 @@ function handleApiError(elementId, err) {
     window.location.href = "./index.html";
     return;
   }
-  showError(elementId, err.response?.data?.error || err.message);
+
+  const errorMessage = err.response?.data?.error || err.message;
+  showError(elementId, errorMessage);
+}
+
+// Add a function to retrieve the active admin's students
+async function getAdminStudents() {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/students`, {
+      headers: getAuthHeaders(),
+    });
+    return response.data;
+  } catch (err) {
+    console.error("Failed to fetch students:", err);
+    return [];
+  }
 }
 
 // Capture photo from video
@@ -509,6 +621,22 @@ document.getElementById("captureBtn")?.addEventListener("click", () => {
   return true;
 });
 
+// Toggle password visibility
+document.querySelectorAll(".password-toggle").forEach((toggle) => {
+  toggle.addEventListener("click", () => {
+    const input = toggle.parentElement.querySelector("input");
+    const icon = toggle.querySelector("i");
+
+    if (input.type === "password") {
+      input.type = "text";
+      icon.classList.replace("fa-eye", "fa-eye-slash");
+    } else {
+      input.type = "password";
+      icon.classList.replace("fa-eye-slash", "fa-eye");
+    }
+  });
+});
+
 // ======================
 // Initialization
 // ======================
@@ -517,10 +645,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Check authentication
   const token = localStorage.getItem("token");
   if (token) {
-    document.getElementById("loginForm").style.display = "none";
-    document.getElementById("appContent").style.display = "block";
-    document.getElementById("userEmail").textContent =
-      JSON.parse(atob(token.split(".")[1]))?.email || "Admin";
+    document.getElementById("loginContainer").style.display = "none";
+    document.getElementById("appContent").style.display = "flex";
+    updateAdminInfoDisplay();
   } else if (!window.location.pathname.endsWith("index.html")) {
     window.location.href = "./index.html";
     return;
@@ -537,32 +664,24 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
   }
 
-  // Initialize first tab camera
-  if (document.querySelector(".tab-btn.active")) {
-    const activeTab = document
-      .querySelector(".tab-btn.active")
-      .getAttribute("data-tab");
-    await initCamera(`${activeTab}Video`);
-  }
-
   // Tab switching
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const tabName = btn.getAttribute("data-tab");
+  document.querySelectorAll(".nav-item").forEach((item) => {
+    item.addEventListener("click", async () => {
+      const tabName = item.getAttribute("data-tab");
 
-      // Hide all tabs
+      // Hide all tabs and deactivate all nav items
       document.querySelectorAll(".tab-content").forEach((tab) => {
         tab.classList.remove("active");
       });
-
-      // Deactivate all buttons
-      document.querySelectorAll(".tab-btn").forEach((tabBtn) => {
-        tabBtn.classList.remove("active");
+      document.querySelectorAll(".nav-item").forEach((navItem) => {
+        navItem.classList.remove("active");
       });
 
-      // Activate current tab
+      // Activate current tab and nav item
       document.getElementById(tabName).classList.add("active");
-      btn.classList.add("active");
+      item.classList.add("active");
+      document.getElementById("contentTitle").textContent =
+        item.querySelector("span").textContent;
 
       // Initialize camera if needed
       if (tabName === "register" || tabName === "attendance") {
@@ -585,9 +704,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     ?.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = document.getElementById("loginBtn");
+      const spinner = document.getElementById("loginSpinner");
+      const text = document.getElementById("loginText");
       const errorEl = document.getElementById("loginError");
 
       btn.disabled = true;
+      text.style.display = "none";
+      spinner.classList.add("active");
       errorEl.textContent = "";
 
       try {
@@ -597,28 +720,158 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
 
         localStorage.setItem("token", response.data.token);
-        document.getElementById("loginForm").style.display = "none";
-        document.getElementById("appContent").style.display = "block";
-        document.getElementById("userEmail").textContent =
-          document.getElementById("loginEmail").value;
+
+        // Store admin information
+        if (response.data.user) {
+          localStorage.setItem("adminInfo", JSON.stringify(response.data.user));
+        }
+
+        document.getElementById("loginContainer").style.display = "none";
+        document.getElementById("appContent").style.display = "flex";
+
+        // Update display with admin info
+        const adminInfo = response.data.user || {
+          email: document.getElementById("loginEmail").value,
+        };
+        document.getElementById("userEmail").textContent = adminInfo.email;
+        if (adminInfo.name) {
+          document.querySelector(".user-role").textContent =
+            adminInfo.department || "Faculty";
+        }
 
         // Initialize first tab camera
         const activeTab = document
-          .querySelector(".tab-btn.active")
+          .querySelector(".nav-item.active")
           .getAttribute("data-tab");
         await initCamera(`${activeTab}Video`);
+
+        if (activeTab === "attendance") {
+          startAttendanceDetection();
+        }
       } catch (err) {
         errorEl.textContent =
           err.response?.data?.error || "Login failed. Check credentials.";
       } finally {
         btn.disabled = false;
+        text.style.display = "inline";
+        spinner.classList.remove("active");
       }
     });
+
+  // Add a function to update admin info display
+  function updateAdminInfoDisplay() {
+    const adminInfoStr = localStorage.getItem("adminInfo");
+    if (adminInfoStr) {
+      try {
+        const adminInfo = JSON.parse(adminInfoStr);
+        document.getElementById("userEmail").textContent =
+          adminInfo.email || "Admin";
+        document.querySelector(".user-role").textContent =
+          adminInfo.department || "Faculty";
+
+        // Update title
+        if (adminInfo.name) {
+          document.querySelector(
+            ".sidebar-header h2"
+          ).textContent = `${adminInfo.name}'s Class`;
+        }
+      } catch (e) {
+        console.error("Error parsing admin info:", e);
+      }
+    }
+  }
 
   // Logout
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     localStorage.removeItem("token");
     stopCamera();
-    window.location.reload();
+    stopAttendanceDetection();
+    window.location.href = "./index.html";
   });
+
+  // Set default dates for report
+  const today = new Date();
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(today.getDate() - 7);
+
+  document.getElementById("startDate").valueAsDate = oneWeekAgo;
+  document.getElementById("endDate").valueAsDate = today;
+
+  // Initialize first tab if authenticated
+  if (token) {
+    const firstTab = document.querySelector(".nav-item");
+    if (firstTab) {
+      firstTab.click();
+    }
+  }
 });
+
+// Admin registration form toggle
+document
+  .getElementById("showRegisterFormBtn")
+  ?.addEventListener("click", (e) => {
+    e.preventDefault();
+    document.getElementById("loginForm").style.display = "none";
+    document.getElementById("adminRegisterForm").style.display = "block";
+  });
+
+document.getElementById("showLoginFormBtn")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  document.getElementById("adminRegisterForm").style.display = "none";
+  document.getElementById("loginForm").style.display = "block";
+});
+
+// Admin registration handler
+document
+  .getElementById("adminRegisterForm")
+  ?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("registerAdminBtn");
+    const spinner = document.getElementById("registerAdminSpinner");
+    const text = document.getElementById("registerAdminText");
+    const errorEl = document.getElementById("registerAdminError");
+
+    // Clear previous errors
+    errorEl.textContent = "";
+
+    // Validate passwords match
+    const password = document.getElementById("registerPassword").value;
+    const confirmPassword = document.getElementById("confirmPassword").value;
+
+    if (password !== confirmPassword) {
+      errorEl.textContent = "Passwords do not match";
+      return;
+    }
+
+    btn.disabled = true;
+    text.style.display = "none";
+    spinner.classList.add("active");
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/register`, {
+        email: document.getElementById("registerEmail").value,
+        password: password,
+        name: document.getElementById("registerName").value,
+        department: document.getElementById("registerDept").value,
+      });
+
+      // Show success and switch to login form
+      const loginError = document.getElementById("loginError");
+      loginError.innerHTML =
+        '<div class="success-message">Registration successful! Please log in.</div>';
+
+      // Switch back to login form
+      document.getElementById("adminRegisterForm").style.display = "none";
+      document.getElementById("loginForm").style.display = "block";
+
+      // Clear the registration form
+      document.getElementById("adminRegisterForm").reset();
+    } catch (err) {
+      errorEl.textContent =
+        err.response?.data?.error || "Registration failed. Please try again.";
+    } finally {
+      btn.disabled = false;
+      text.style.display = "inline";
+      spinner.classList.remove("active");
+    }
+  });

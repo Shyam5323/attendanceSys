@@ -557,8 +557,8 @@ app.post("/api/students", authenticate, apiLimiter, async (req, res) => {
     try {
       const verifiedEmails = await ses.listVerifiedEmailAddresses().promise();
 
-      if (!verifiedEmails.VerifiedEmailAddresses.includes(studentEmail)) {
-        verifiedSenderEmail = await verifyAndAddSESEmail(studentEmail);
+      if (!verifiedEmails.VerifiedEmailAddresses.includes(email)) {
+        verifiedSenderEmail = await verifyAndAddSESEmail(emailx1);
       }
     } catch (err) {
       console.error("Error checking verified emails:", err);
