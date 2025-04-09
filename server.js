@@ -157,6 +157,10 @@ async function getAttendanceForStudent(studentId, datetimeSlot) {
 }
 
 async function getAttendanceReport(startDate, endDate, department) {
+  console.log(
+    `Generating report for range: ${startDate} to ${endDate}, Dept: ${department}`
+  ); // Log inputs
+
   let params = {
     TableName: ATTENDANCE_TABLE,
     IndexName: "DateIndex",
@@ -175,26 +179,47 @@ async function getAttendanceReport(startDate, endDate, department) {
     params.ExpressionAttributeValues[":department"] = department;
   }
 
-  const result = await dynamodb.query(params).promise();
+  console.log("DynamoDB Query Params:", JSON.stringify(params, null, 2)); // Log query params
 
-  // Need to join with student data
-  const reportData = [];
-  for (const record of result.Items) {
-    const student = await getStudentByStudentId(record.studentId);
-    if (student) {
-      reportData.push({
-        date: record.date,
-        studentId: student.studentId,
-        studentName: student.name,
-        department: student.department,
-        timeSlot: record.timeSlot,
-      });
+  try {
+    // Add try..catch around DB operations
+    const result = await dynamodb.query(params).promise();
+    console.log(
+      `Query successful. Items returned: ${result.Items?.length || 0}`
+    ); // Log # items
+
+    const reportData = [];
+    if (result.Items) {
+      // Check if Items exist
+      for (const record of result.Items) {
+        console.log("Processing record:", JSON.stringify(record)); // Log each record
+        if (!record.studentId) {
+          console.warn("Record missing studentId:", record);
+          continue; // Skip if no studentId
+        }
+        const student = await getStudentByStudentId(record.studentId);
+        if (student) {
+          console.log(`Found student: ${student.name}`); // Log found student
+          reportData.push({
+            date: record.date,
+            studentId: student.studentId,
+            studentName: student.name,
+            department: student.department,
+            timeSlot: record.timeSlot,
+          });
+        } else {
+          console.warn(`Student not found for studentId: ${record.studentId}`); // Log if student lookup fails
+        }
+      }
     }
+
+    console.log(`Final reportData length: ${reportData.length}`); // Log final count
+    return reportData;
+  } catch (err) {
+    console.error("Error during getAttendanceReport query/processing:", err);
+    throw err; // Re-throw error to be caught by route handler
   }
-
-  return reportData;
 }
-
 // S3 Functions
 async function uploadImageToS3(studentId, imageData) {
   const buffer = Buffer.from(

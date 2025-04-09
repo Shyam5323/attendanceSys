@@ -367,6 +367,7 @@ document.getElementById("reportForm")?.addEventListener("submit", async (e) => {
         headers: getAuthHeaders(),
       }
     );
+    console.log(response.data);
 
     // Display results
     displayReportData(response.data);
@@ -398,59 +399,105 @@ function getAuthHeaders() {
 
 // Display report data
 function displayReportData(response) {
+  // Get DOM elements with null checks
   const container = document.getElementById("reportResult");
   const tableBody = document.querySelector("#reportTable tbody");
+  const exportBtn = document.getElementById("exportBtn");
+  const chartContainer = document.getElementById("chartContainer");
 
-  // Check if we have records in the response
-  if (!response.records || response.records.length === 0) {
-    container.innerHTML =
-      '<div class="info-message">No attendance records found</div>';
-    document.getElementById("exportBtn").style.display = "none";
+  // Validate required elements exist
+  if (!container || !tableBody) {
+    console.error("Required report elements not found");
     return;
   }
 
-  // Clear existing rows
+  // Clear previous content
+  container.innerHTML = "";
   tableBody.innerHTML = "";
 
-  // Add new rows from the records array
-  response.records.forEach((record) => {
+  // Check if we have data
+  if (!response || (!response.records && !Array.isArray(response))) {
+    container.innerHTML = '<div class="info-message">No data available</div>';
+    if (exportBtn) exportBtn.style.display = "none";
+    return;
+  }
+
+  // Handle both old array format and new structured format
+  const records = response.records || response;
+
+  if (records.length === 0) {
+    container.innerHTML =
+      '<div class="info-message">No attendance records found</div>';
+    if (exportBtn) exportBtn.style.display = "none";
+    return;
+  }
+
+  // Add records to table
+  records.forEach((record) => {
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${record.studentId}</td>
-      <td>${record.studentName}</td>
-      <td>${record.department}</td>
-      <td>${new Date(record.date).toLocaleDateString()}</td>
+      <td>${record.studentId || ""}</td>
+      <td>${record.studentName || record.name || ""}</td>
+      <td>${record.department || ""}</td>
+      <td>${record.date ? new Date(record.date).toLocaleDateString() : ""}</td>
       <td><span class="badge badge-success">Present</span></td>
       <td>${
-        record.timeSlot === "morning"
-          ? "Morning"
-          : record.timeSlot === "afternoon"
-          ? "Afternoon"
-          : "Evening"
+        record.timeSlot
+          ? record.timeSlot === "morning"
+            ? "Morning"
+            : record.timeSlot === "afternoon"
+            ? "Afternoon"
+            : "Evening"
+          : ""
       }</td>
     `;
     tableBody.appendChild(row);
   });
 
-  // Update summary stats
+  // Update summary stats if available
   if (response.summary) {
-    document.getElementById("totalRecords").textContent =
-      response.summary.totalRecords || 0;
-    document.getElementById("avgAttendance").textContent = response.summary
-      .avgAttendance
-      ? `${response.summary.avgAttendance}%`
-      : "0%";
-    document.getElementById("topDepartment").textContent =
-      response.summary.topDepartment || "-";
-    document.getElementById("mostPresent").textContent =
-      response.summary.mostPresentStudent || "-";
+    const summaryElements = {
+      totalRecords: document.getElementById("totalRecords"),
+      avgAttendance: document.getElementById("avgAttendance"),
+      topDepartment: document.getElementById("topDepartment"),
+      mostPresent: document.getElementById("mostPresent")
+    };
+
+    // Only update elements that exist
+    if (summaryElements.totalRecords) {
+      summaryElements.totalRecords.textContent = 
+        response.summary.totalRecords || records.length;
+    }
+    if (summaryElements.avgAttendance) {
+      summaryElements.avgAttendance.textContent = response.summary.avgAttendance
+        ? `${response.summary.avgAttendance}%`
+        : "N/A";
+    }
+    if (summaryElements.topDepartment) {
+      summaryElements.topDepartment.textContent = 
+        response.summary.topDepartment || "-";
+    }
+    if (summaryElements.mostPresent) {
+      summaryElements.mostPresent.textContent = 
+        response.summary.mostPresentStudent || "-";
+    }
   }
 
-  // Initialize chart with chartData
-  initAttendanceChart(response.chartData || []);
+  // Initialize chart if data and container available
+  if (response.chartData && response.chartData.length > 0 && chartContainer) {
+    initAttendanceChart(response.chartData);
+  } else if (chartContainer) {
+    // Hide chart if no data but container exists
+    chartContainer.style.display = "none";
+  }
 
-  document.getElementById("exportBtn").style.display = "block";
-  window.reportData = response; // Store for export
+  // Show export button if it exists
+  if (exportBtn) {
+    exportBtn.style.display = "block";
+  }
+  
+  // Store report data for export
+  window.reportData = { records };
 }
 
 // Initialize attendance chart
