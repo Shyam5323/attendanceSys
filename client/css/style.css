@@ -615,12 +615,7 @@ body {
   justify-content: center;
 }
 
-.face-guide {
-  width: 200px;
-  height: 200px;
-  border: 2px dashed rgba(255, 255, 255, 0.5);
-  border-radius: 50%;
-}
+
 
 .live-recognition {
   position: relative;
